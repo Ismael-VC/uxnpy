@@ -316,7 +316,9 @@ class Uxn:
     def eval(self, at: int = 0x100) -> 'Uxn':
         self.pc = at
         steps = 0x80000
-        while steps > 0 and self.step(): 
+        while steps > 0 and self.step():
+            if self.emu and hasattr(self.emu, 'update_repr'):
+                self.emu.update_repr()
             steps -= 1
         return self
 
