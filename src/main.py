@@ -1,8 +1,21 @@
+import logging 
 from textual.app import App, ComposeResult
 from textual.widgets import RichLog, Input, Static, Footer
 from .emu import Emu
 from .devices.console import Console
 import sys
+
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('uxnpy_debug.log', mode='w'),  # 'w' overwrites on each run; use 'a' for append
+        # Optional: Also log to console for non-TUI runs
+        logging.StreamHandler(sys.stderr)
+    ]
+)
+logger = logging.getLogger(__name__)
 
 class UxnApp(App):
     """
@@ -40,6 +53,7 @@ class UxnApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
+        logger.info("TUI starting...")
         self.emu = Emu(app=self)  # Primary emulator for debugging
         self.emu.init()
         # Load initial ROM to output '*'
@@ -52,7 +66,7 @@ class UxnApp(App):
             assembler_rom = bytearray(f.read())
         self.assembler.load(assembler_rom)
         # Debug: Check initial assembler state
-        print(f"Assembler initialized. Dev[0x10-0x11]: {self.assembler.uxn.dev[0x10]:02x} {self.assembler.uxn.dev[0x11]:02x}", file=sys.stderr)
+        logger.debug(f"Assembler initialized. Dev[0x10-0x11]: {self.assembler.uxn.dev[0x10]:02x} {self.assembler.uxn.dev[0x11]:02x}")
         self.update_repr()
 
     def write_output(self, char: str) -> None:
@@ -72,6 +86,7 @@ class UxnApp(App):
         Handle Uxntal input: send to assembler, capture stdout (ROM) and stderr (status), and load into primary emulator.
         """
         uxntal_code = event.value
+        logger.debug(f"Processing Uxntal input: {uxntal_code}")
         # Clear assembler's buffers
         self.assembler.console.output_buffer = bytearray()
         self.assembler.console.error_buffer = bytearray()
@@ -81,17 +96,19 @@ class UxnApp(App):
         status_message = self.assembler.console.error_buffer.decode('ascii', errors='ignore')
         assembled_rom = self.assembler.console.output_buffer
         # Debug: Log buffer contents and assembler state
-        print(f"Input: {uxntal_code}", file=sys.stderr)
-        print(f"Output Buffer (ROM): {assembled_rom.hex()}", file=sys.stderr)
-        print(f"Error Buffer (Status): {status_message}", file=sys.stderr)
-        print(f"Assembler Dev[0x18]: {self.assembler.uxn.dev[0x18]:02x}, Dev[0x19]: {self.assembler.uxn.dev[0x19]:02x}", file=sys.stderr)
+        logger.debug(f"Output Buffer (ROM): {assembled_rom.hex()}")
+        logger.debug(f"Error Buffer (Status): {status_message}")
+        logger.debug(f"Assembler Dev[0x18]: {self.assembler.uxn.dev[0x18]:02x}, Dev[0x19]: {self.assembler.uxn.dev[0x19]:02x}")
         # Write Uxntal code, status, and ROM to RichLog
         self.query_one(RichLog).write(f"Input Uxntal:\n{uxntal_code}\n")
         self.query_one(RichLog).write(f"Assembler: {status_message}\n")
         self.query_one(RichLog).write(f"Assembled ROM: {assembled_rom.hex()}\n")
         # Load assembled ROM into primary emulator
         if assembled_rom:
+            logger.info(f"Loading assembled ROM into primary Emu: {assembled_rom.hex()}")
             self.emu.load(assembled_rom)
+        else:
+            logger.warning("No assembled ROM produced")
         self.update_repr()
 
 if __name__ == "__main__":

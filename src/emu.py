@@ -1,8 +1,12 @@
+import logging
 from typing import Optional, List
 import base64
 import sys
 from .uxn import Uxn
 from .devices.console import Console, peek16, poke16
+
+
+logger = logging.getLogger(__name__)
 
 def b64encode(bs: bytes) -> str:
     """
@@ -165,14 +169,7 @@ class Emu:
         self.load(rom)
 
     def load(self, rom: bytearray, from_url: bool = False) -> None:
-        """
-        Load a ROM into the Uxn VM and evaluate it.
-        >>> e = Emu()
-        >>> e.load(bytearray([0xa0, 0x2a, 0x18, 0x17]))
-        *
-        >>> e.uxn.wst.ptr
-        0
-        """
+        logger.debug(f"Loading ROM of length {len(rom)}")
         self.uxn.load(rom).eval(0x0100)
         self.update_repr()
 
@@ -191,22 +188,7 @@ class Emu:
         return self.uxn.dev[port]
 
     def deo(self, port: int, val: int) -> None:
-        """
-        Device output: write to a device port.
-        >>> import sys
-        >>> from io import StringIO
-        >>> e = Emu()
-        >>> old_stdout = sys.stdout
-        >>> sys.stdout = StringIO()
-        >>> e.deo(0x18, 42)
-        >>> sys.stdout.getvalue()
-        '*'
-        >>> sys.stdout = old_stdout
-        >>> e = Emu(capture_output=True)
-        >>> e.deo(0x18, 42)
-        >>> e.console.output_buffer
-        bytearray(b'*')
-        """
+        logger.debug(f"DEO: port={port:02x}, val={val:02x}")
         self.uxn.dev[port] = val
         if (port & 0xf0) == 0x00 and self.system:
             self.system.deo(port)

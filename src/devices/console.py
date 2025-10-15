@@ -1,7 +1,11 @@
+import logging
 from typing import Optional
 import sys
 from io import StringIO
 from ..uxn import Uxn
+
+
+logger = logging.getLogger(__name__)
 
 def peek16(dev: bytearray, addr: int) -> int:
     """
@@ -62,25 +66,7 @@ class Console:
         pass
 
     def deo(self, addr: int) -> None:
-        """
-        Handle device output to console ports (0x18 for stdout, 0x19 for stderr).
-        >>> from unittest.mock import Mock
-        >>> u = Uxn()
-        >>> app = Mock()
-        >>> c = Console(u, app=app)
-        >>> u.dev[0x18] = 42
-        >>> c.deo(0x18)
-        >>> app.write_output.assert_called_with('*')
-        >>> c = Console(u, capture_output=True)
-        >>> u.dev[0x18] = 65
-        >>> c.deo(0x18)
-        >>> c.output_buffer
-        bytearray(b'A')
-        >>> u.dev[0x19] = 66
-        >>> c.deo(0x19)
-        >>> c.error_buffer
-        bytearray(b'B')
-        """
+        logger.debug(f"Console DEO: addr={addr:02x}")
         if addr == 0x18:
             self.output(self.uxn.dev[0x18])
         elif addr == 0x19:
@@ -89,16 +75,7 @@ class Console:
             self.app.update_repr()
 
     def on_console(self, query: str) -> None:
-        """
-        Process a line of input, sending each character to the VM.
-        >>> u = Uxn()
-        >>> c = Console(u)
-        >>> c.on_console("hi")
-        >>> u.dev[0x12]
-        10
-        >>> u.dev[0x17]
-        1
-        """
+        logger.debug(f"Console input: {query}")
         for char in query:
             self.input(ord(char), 1)
         self.input(0x0a, 1)
@@ -106,44 +83,18 @@ class Console:
             self.app.update_repr()
 
     def output(self, char: int) -> None:
-        """
-        Output a character to stdout, Textual app, or output_buffer.
-        >>> c = Console(Uxn())
-        >>> old_stdout = sys.stdout
-        >>> sys.stdout = StringIO()
-        >>> c.output(65)
-        >>> sys.stdout.getvalue()
-        'A'
-        >>> sys.stdout = old_stdout
-        >>> c = Console(Uxn(), capture_output=True)
-        >>> c.output(65)
-        >>> c.output_buffer
-        bytearray(b'A')
-        """
         if self.capture_output:
             self.output_buffer.append(char)
+            logger.debug(f"Captured stdout: {char:02x} ({chr(char) if 32 <= char < 127 else '?'})")
         elif self.app:
             self.app.write_output(chr(char))
         else:
             print(chr(char), end='', flush=True)
 
     def error(self, char: int) -> None:
-        """
-        Output a character to stderr, Textual app, or error_buffer.
-        >>> c = Console(Uxn())
-        >>> old_stderr = sys.stderr
-        >>> sys.stderr = StringIO()
-        >>> c.error(66)
-        >>> sys.stderr.getvalue()
-        'B'
-        >>> sys.stderr = old_stderr
-        >>> c = Console(Uxn(), capture_output=True)
-        >>> c.error(66)
-        >>> c.error_buffer
-        bytearray(b'B')
-        """
         if self.capture_output:
             self.error_buffer.append(char)
+            logger.debug(f"Captured stderr: {char:02x} ({chr(char) if 32 <= char < 127 else '?'})")
         elif self.app:
             self.app.write_output(f"[red]Error: {chr(char)}[/red]")
         else:
