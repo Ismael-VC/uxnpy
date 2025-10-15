@@ -1,5 +1,8 @@
 from typing import Any, Optional
+import logging
 
+
+logger = logging.getLogger(__name__)
 
 class Stack:
     def __init__(self, u: 'Uxn', name: str) -> None:
@@ -314,6 +317,7 @@ class Uxn:
         return self.load(program).eval()
 
     def eval(self, at: int = 0x100) -> 'Uxn':
+        logger.debug(f"Eval starting at addr: {at:04x}, PC: {self.pc:04x}")
         self.pc = at
         steps = 0x80000
         while steps > 0 and self.step():

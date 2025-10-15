@@ -1,26 +1,23 @@
-import logging 
+# src/main.py
+import logging
 from textual.app import App, ComposeResult
 from textual.widgets import RichLog, Input, Static, Footer
 from .emu import Emu
 from .devices.console import Console
 import sys
 
-
+# Configure logging to file
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('uxnpy_debug.log', mode='w'),  # 'w' overwrites on each run; use 'a' for append
-        # Optional: Also log to console for non-TUI runs
-        logging.StreamHandler(sys.stderr)
+        logging.FileHandler('tui_debug.log', mode='w'),  # Overwrites each run
+        logging.StreamHandler(sys.stderr)  # Optional console output
     ]
 )
 logger = logging.getLogger(__name__)
 
 class UxnApp(App):
-    """
-    Textual CLI application for the Uxn emulator with Uxntal assembler integration.
-    """
     CSS = """
     RichLog#output {
         height: 60%;
@@ -32,6 +29,9 @@ class UxnApp(App):
     Input {
         height: 10%;
         margin: 1;
+        &:focus {
+            border: heavy green;  # Visual feedback for focus
+        }
     }
     Static#repr {
         height: 25%;
@@ -65,33 +65,30 @@ class UxnApp(App):
         with open("bin/drifloon.rom", "rb") as f:
             assembler_rom = bytearray(f.read())
         self.assembler.load(assembler_rom)
-        # Debug: Check initial assembler state
-        logger.debug(f"Assembler initialized. Dev[0x10-0x11]: {self.assembler.uxn.dev[0x10]:02x} {self.assembler.uxn.dev[0x11]:02x}")
+        # Set input focus and log
+        self.query_one(Input).focus()
+        logger.debug("Input widget focused")
         self.update_repr()
 
     def write_output(self, char: str) -> None:
-        """
-        Write a character to the RichLog widget (used by primary emulator).
-        """
+        logger.debug(f"Writing to RichLog: {char}")
         self.query_one(RichLog).write(char)
 
     def update_repr(self) -> None:
-        """
-        Update the Static widget with the current Uxn state of the primary emulator.
-        """
+        logger.debug("Updating repr widget")
         self.query_one("#repr", Static).update(str(self.emu.uxn))
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        """
-        Handle Uxntal input: send to assembler, capture stdout (ROM) and stderr (status), and load into primary emulator.
-        """
+        logger.debug(f"Input submitted: {event.value}")
         uxntal_code = event.value
-        logger.debug(f"Processing Uxntal input: {uxntal_code}")
         # Clear assembler's buffers
         self.assembler.console.output_buffer = bytearray()
         self.assembler.console.error_buffer = bytearray()
         # Send Uxntal code to assembler
         self.assembler.console.on_console(uxntal_code)
+        # Set input vector and force evaluation
+        poke16(self.assembler.uxn.dev, 0x10, 0x0100)
+        self.assembler.uxn.eval(0x0100)
         # Get status message (stderr) and assembled ROM (stdout)
         status_message = self.assembler.console.error_buffer.decode('ascii', errors='ignore')
         assembled_rom = self.assembler.console.output_buffer
@@ -99,7 +96,7 @@ class UxnApp(App):
         logger.debug(f"Output Buffer (ROM): {assembled_rom.hex()}")
         logger.debug(f"Error Buffer (Status): {status_message}")
         logger.debug(f"Assembler Dev[0x18]: {self.assembler.uxn.dev[0x18]:02x}, Dev[0x19]: {self.assembler.uxn.dev[0x19]:02x}")
-        # Write Uxntal code, status, and ROM to RichLog
+        # Write to RichLog
         self.query_one(RichLog).write(f"Input Uxntal:\n{uxntal_code}\n")
         self.query_one(RichLog).write(f"Assembler: {status_message}\n")
         self.query_one(RichLog).write(f"Assembled ROM: {assembled_rom.hex()}\n")
@@ -109,7 +106,15 @@ class UxnApp(App):
             self.emu.load(assembled_rom)
         else:
             logger.warning("No assembled ROM produced")
+        # Refocus input to ensure next input works
+        self.query_one(Input).focus()
         self.update_repr()
+
+    # Add key event logging to diagnose input issues
+    def on_key(self, event) -> None:
+        logger.debug(f"Key event: {event.key} (pressed: {event.is_pressed})")
+        if event.key == "escape":
+            self.app.exit()
 
 if __name__ == "__main__":
     app = UxnApp()
