@@ -1,10 +1,11 @@
-# src/main.py
 import logging
 from textual.app import App, ComposeResult
 from textual.widgets import RichLog, Input, Static, Footer
+from textual.worker import Worker
 from .emu import Emu
 from .devices.console import Console
 import sys
+from typing import Optional
 
 # Configure logging to file
 logging.basicConfig(
@@ -16,6 +17,11 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+def poke16(mem: bytearray, addr: int, val: int) -> None:
+    """Helper to write 16-bit value."""
+    mem[addr] = (val >> 8) & 0xff
+    mem[addr + 1] = val & 0xff
 
 class UxnApp(App):
     CSS = """
@@ -78,25 +84,42 @@ class UxnApp(App):
         logger.debug("Updating repr widget")
         self.query_one("#repr", Static).update(str(self.emu.uxn))
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        logger.debug(f"Input submitted: {event.value}")
-        uxntal_code = event.value
+    async def process_assembler(self, uxntal_code: str) -> tuple[bytearray, str]:
+        """Async function to process assembler evaluation."""
+        logger.debug(f"Processing assembler input: {uxntal_code}")
         # Clear assembler's buffers
         self.assembler.console.output_buffer = bytearray()
         self.assembler.console.error_buffer = bytearray()
         # Send Uxntal code to assembler
         self.assembler.console.on_console(uxntal_code)
-        # Set input vector and force evaluation
+        # Set input vector
         poke16(self.assembler.uxn.dev, 0x10, 0x0100)
-        self.assembler.uxn.eval(0x0100)
-        # Get status message (stderr) and assembled ROM (stdout)
+        # Run eval with a step limit to avoid blocking
+        max_steps = 10000
+        steps = 0
+        logger.debug(f"Starting eval at 0x0100 with max {max_steps} steps")
+        while self.assembler.uxn.pc != 0 and steps < max_steps:
+            self.assembler.uxn.step()
+            steps += 1
+        logger.debug(f"Eval completed after {steps} steps, PC: {self.assembler.uxn.pc:04x}")
+        # Get results
         status_message = self.assembler.console.error_buffer.decode('ascii', errors='ignore')
         assembled_rom = self.assembler.console.output_buffer
-        # Debug: Log buffer contents and assembler state
-        logger.debug(f"Output Buffer (ROM): {assembled_rom.hex()}")
-        logger.debug(f"Error Buffer (Status): {status_message}")
-        logger.debug(f"Assembler Dev[0x18]: {self.assembler.uxn.dev[0x18]:02x}, Dev[0x19]: {self.assembler.uxn.dev[0x19]:02x}")
-        # Write to RichLog
+        logger.debug(f"Assembler output - ROM: {assembled_rom.hex()}, Status: {status_message}")
+        return assembled_rom, status_message
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        logger.debug(f"Input submitted: {event.value}")
+        uxntal_code = event.value
+        # Start assembler processing in a background task
+        self.process_worker = self.create_task(self.process_assembler(uxntal_code))
+        self.process_worker.add_done_callback(lambda task: self._on_assembler_done(task.result()))
+
+    def _on_assembler_done(self, result: tuple[bytearray, str]) -> None:
+        """Handle the result of the assembler task."""
+        assembled_rom, status_message = result
+        logger.debug(f"Assembler task done - ROM: {assembled_rom.hex()}, Status: {status_message}")
+        # Update UI
         self.query_one(RichLog).write(f"Input Uxntal:\n{uxntal_code}\n")
         self.query_one(RichLog).write(f"Assembler: {status_message}\n")
         self.query_one(RichLog).write(f"Assembled ROM: {assembled_rom.hex()}\n")
@@ -106,11 +129,11 @@ class UxnApp(App):
             self.emu.load(assembled_rom)
         else:
             logger.warning("No assembled ROM produced")
-        # Refocus input to ensure next input works
+        # Refocus input
         self.query_one(Input).focus()
+        logger.debug("Input widget refocused")
         self.update_repr()
 
-    # Add key event logging to diagnose input issues
     def on_key(self, event) -> None:
         logger.debug(f"Key event: {event.key} (pressed: {event.is_pressed})")
         if event.key == "escape":
